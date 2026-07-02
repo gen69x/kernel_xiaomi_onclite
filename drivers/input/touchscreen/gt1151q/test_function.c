@@ -210,9 +210,10 @@ static void _get_channel_max_value(void)
 static void _get_channel_average_value(void)
 {
 	int i;
+	int size = sys.sc_sensor_num * sys.sc_driver_num;
 	if (current_data_index == 0) {
-		memset(channel_average, 0, sizeof(channel_average) / sizeof(channel_average[0]));
-		memset(channel_average, 0, sizeof(channel_square_average) / sizeof(channel_square_average[0]));
+		memset(channel_average, 0, size * sizeof(int));
+		memset(channel_square_average, 0, size * sizeof(int));
 	}
 
 	for (i = 0; i < sys.sc_sensor_num * sys.sc_driver_num; i++) {
