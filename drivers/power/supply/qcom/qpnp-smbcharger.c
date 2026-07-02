@@ -1157,17 +1157,6 @@ static int get_prop_batt_voltage_max_design(struct smbchg_chip *chip)
 	return uv;
 }
 
-static int get_prop_batt_charge_counter(struct smbchg_chip *chip)
-{
-	int bcc = 0, rc;
-
-	rc = get_property_from_fg(chip,
-				POWER_SUPPLY_PROP_CHARGE_COUNTER, &bcc);
-	if (rc)
-		pr_smb(PR_STATUS, "Couldn't get charge_counter rc = %d\n", rc);
-	return bcc;
-}
-
 #ifndef CONFIG_QPNP_LEGACY_CYCLE_COUNT
 static int get_prop_batt_cycle_count(struct smbchg_chip *chip)
 {
