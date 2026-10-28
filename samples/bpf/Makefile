@@ -2,7 +2,6 @@
 obj- := dummy.o
 
 # List of programs to build
-hostprogs-y := test_verifier test_maps
 hostprogs-y += sock_example
 hostprogs-y += fds_example
 hostprogs-y += sockex1
@@ -29,9 +28,9 @@ hostprogs-y += test_current_task_under_cgroup
 hostprogs-y += trace_event
 hostprogs-y += sampleip
 hostprogs-y += tc_l2_redirect
+hostprogs-y += lwt_len_hist
+hostprogs-y += xdp_tx_iptunnel
 
-test_verifier-objs := test_verifier.o libbpf.o
-test_maps-objs := test_maps.o libbpf.o
 sock_example-objs := sock_example.o libbpf.o
 fds_example-objs := bpf_load.o libbpf.o fds_example.o
 sockex1-objs := bpf_load.o libbpf.o sockex1_user.o
@@ -60,6 +59,8 @@ test_current_task_under_cgroup-objs := bpf_load.o libbpf.o \
 trace_event-objs := bpf_load.o libbpf.o trace_event_user.o
 sampleip-objs := bpf_load.o libbpf.o sampleip_user.o
 tc_l2_redirect-objs := bpf_load.o libbpf.o tc_l2_redirect_user.o
+lwt_len_hist-objs := bpf_load.o libbpf.o lwt_len_hist_user.o
+xdp_tx_iptunnel-objs := bpf_load.o libbpf.o xdp_tx_iptunnel_user.o
 
 # Tell kbuild to always build the programs
 always := $(hostprogs-y)
@@ -90,6 +91,8 @@ always += xdp2_kern.o
 always += test_current_task_under_cgroup_kern.o
 always += trace_event_kern.o
 always += sampleip_kern.o
+always += lwt_len_hist_kern.o
+always += xdp_tx_iptunnel_kern.o
 
 HOSTCFLAGS += -I$(objtree)/usr/include
 
@@ -117,6 +120,8 @@ HOSTLOADLIBES_test_current_task_under_cgroup += -lelf
 HOSTLOADLIBES_trace_event += -lelf
 HOSTLOADLIBES_sampleip += -lelf
 HOSTLOADLIBES_tc_l2_redirect += -l elf
+HOSTLOADLIBES_lwt_len_hist += -l elf
+HOSTLOADLIBES_xdp_tx_iptunnel += -lelf
 
 # Allows pointing LLC/CLANG to a LLVM backend with bpf support, redefine on cmdline:
 #  make samples/bpf/ LLC=~/git/llvm/build/bin/llc CLANG=~/git/llvm/build/bin/clang

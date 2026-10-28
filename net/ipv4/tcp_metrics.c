@@ -375,11 +375,9 @@ void tcp_update_metrics(struct sock *sk)
 	u32 val;
 	int m;
 
+	sk_dst_confirm(sk);
 	if (sysctl_tcp_nometrics_save || !dst)
 		return;
-
-	if (dst->flags & DST_HOST)
-		dst_confirm(dst);
 
 	rcu_read_lock();
 	if (icsk->icsk_backoff || !tp->srtt_us) {
@@ -493,10 +491,9 @@ void tcp_init_metrics(struct sock *sk)
 	struct tcp_metrics_block *tm;
 	u32 val, crtt = 0; /* cached RTT scaled by 8 */
 
+	sk_dst_confirm(sk);
 	if (!dst)
 		goto reset;
-
-	dst_confirm(dst);
 
 	rcu_read_lock();
 	tm = tcp_get_metrics(sk, dst, true);
@@ -565,16 +562,6 @@ reset:
 
 		inet_csk(sk)->icsk_rto = TCP_TIMEOUT_FALLBACK;
 	}
-	/* Cut cwnd down to 1 per RFC5681 if SYN or SYN-ACK has been
-	 * retransmitted. In light of RFC6298 more aggressive 1sec
-	 * initRTO, we only reset cwnd when more than 1 SYN/SYN-ACK
-	 * retransmission has occurred.
-	 */
-	if (tp->total_retrans > 1)
-		tp->snd_cwnd = 1;
-	else
-		tp->snd_cwnd = tcp_init_cwnd(tp, dst);
-	tp->snd_cwnd_stamp = tcp_time_stamp;
 }
 
 bool tcp_peer_is_proven(struct request_sock *req, struct dst_entry *dst,
@@ -606,7 +593,6 @@ bool tcp_peer_is_proven(struct request_sock *req, struct dst_entry *dst,
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(tcp_peer_is_proven);
 
 void tcp_fetch_timewait_stamp(struct sock *sk, struct dst_entry *dst)
 {
@@ -685,8 +671,7 @@ bool tcp_tw_remember_stamp(struct inet_timewait_sock *tw)
 static DEFINE_SEQLOCK(fastopen_seqlock);
 
 void tcp_fastopen_cache_get(struct sock *sk, u16 *mss,
-			    struct tcp_fastopen_cookie *cookie,
-			    int *syn_loss, unsigned long *last_syn_loss)
+			    struct tcp_fastopen_cookie *cookie)
 {
 	struct tcp_metrics_block *tm;
 
@@ -703,8 +688,6 @@ void tcp_fastopen_cache_get(struct sock *sk, u16 *mss,
 			*cookie = tfom->cookie;
 			if (cookie->len <= 0 && tfom->try_exp == 1)
 				cookie->exp = true;
-			*syn_loss = tfom->syn_loss;
-			*last_syn_loss = *syn_loss ? tfom->last_syn_loss : 0;
 		} while (read_seqretry(&fastopen_seqlock, seq));
 	}
 	rcu_read_unlock();
@@ -1142,7 +1125,7 @@ static int __net_init tcp_net_metrics_init(struct net *net)
 
 	slots = tcpmhash_entries;
 	if (!slots) {
-		if (totalram_pages >= 128 * 1024)
+		if (totalram_pages() >= 128 * 1024)
 			slots = 16 * 1024;
 		else
 			slots = 8 * 1024;

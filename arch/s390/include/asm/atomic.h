@@ -153,7 +153,7 @@ static inline int atomic_cmpxchg(atomic_t *v, int old, int new)
 	return old;
 }
 
-static inline int __atomic_add_unless(atomic_t *v, int a, int u)
+static inline int atomic_fetch_add_unless(atomic_t *v, int a, int u)
 {
 	int c, old;
 	c = atomic_read(v);
@@ -340,6 +340,5 @@ static inline long long atomic64_dec_if_positive(atomic64_t *v)
 #define atomic64_dec(_v)		atomic64_sub(1, _v)
 #define atomic64_dec_return(_v)		atomic64_sub_return(1, _v)
 #define atomic64_dec_and_test(_v)	(atomic64_sub_return(1, _v) == 0)
-#define atomic64_inc_not_zero(v)	atomic64_add_unless((v), 1, 0)
 
 #endif /* __ARCH_S390_ATOMIC__  */

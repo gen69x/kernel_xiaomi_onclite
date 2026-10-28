@@ -93,8 +93,17 @@ void inet_diag_msg_common_fill(struct inet_diag_msg *r, struct sock *sk)
 }
 EXPORT_SYMBOL_GPL(inet_diag_msg_common_fill);
 
-static size_t inet_sk_attr_size(void)
+static size_t inet_sk_attr_size(struct sock *sk,
+				const struct inet_diag_req_v2 *req,
+				bool net_admin)
 {
+	const struct inet_diag_handler *handler;
+	size_t aux = 0;
+
+	handler = inet_diag_table[req->sdiag_protocol];
+	if (handler && handler->idiag_get_aux_size)
+		aux = handler->idiag_get_aux_size(sk, net_admin);
+
 	return	  nla_total_size(sizeof(struct tcp_info))
 		+ nla_total_size(1) /* INET_DIAG_SHUTDOWN */
 		+ nla_total_size(1) /* INET_DIAG_TOS */
@@ -105,6 +114,7 @@ static size_t inet_sk_attr_size(void)
 		+ nla_total_size(SK_MEMINFO_VARS * sizeof(u32))
 		+ nla_total_size(TCP_CA_NAME_MAX)
 		+ nla_total_size(sizeof(struct tcpvegas_info))
+		+ aux
 		+ 64;
 }
 
@@ -200,6 +210,15 @@ int inet_sk_diag_fill(struct sock *sk, struct inet_connection_sock *icsk,
 		if (sock_diag_put_meminfo(sk, skb, INET_DIAG_SKMEMINFO))
 			goto errout;
 
+	/*
+	 * RAW sockets might have user-defined protocols assigned,
+	 * so report the one supplied on socket creation.
+	 */
+	if (sk->sk_type == SOCK_RAW) {
+		if (nla_put_u8(skb, INET_DIAG_PROTOCOL, sk->sk_protocol))
+			goto errout;
+	}
+
 	if (!icsk) {
 		handler->idiag_get_info(sk, r, NULL);
 		goto out;
@@ -251,6 +270,10 @@ int inet_sk_diag_fill(struct sock *sk, struct inet_connection_sock *icsk,
 
 	handler->idiag_get_info(sk, r, info);
 
+	if (ext & (1 << (INET_DIAG_INFO - 1)) && handler->idiag_get_aux)
+		if (handler->idiag_get_aux(sk, net_admin, skb) < 0)
+			goto errout;
+
 	if (sk->sk_state < TCP_TIME_WAIT) {
 		union tcp_cc_info info;
 		size_t sz = 0;
@@ -262,6 +285,17 @@ int inet_sk_diag_fill(struct sock *sk, struct inet_connection_sock *icsk,
 			sz = ca_ops->get_info(sk, ext, &attr, &info);
 		rcu_read_unlock();
 		if (sz && nla_put(skb, attr, sz, &info) < 0)
+			goto errout;
+	}
+
+	if (ext & (1 << (INET_DIAG_CLASS_ID - 1))) {
+		u32 classid = 0;
+
+#ifdef CONFIG_SOCK_CGROUP_DATA
+		classid = sock_cgroup_classid(&sk->sk_cgrp_data);
+#endif
+
+		if (nla_put_u32(skb, INET_DIAG_CLASS_ID, classid))
 			goto errout;
 	}
 
@@ -431,6 +465,7 @@ int inet_diag_dump_one_icsk(struct inet_hashinfo *hashinfo,
 			    const struct nlmsghdr *nlh,
 			    const struct inet_diag_req_v2 *req)
 {
+	bool net_admin = netlink_net_capable(in_skb, CAP_NET_ADMIN);
 	struct net *net = sock_net(in_skb->sk);
 	struct sk_buff *rep;
 	struct sock *sk;
@@ -440,7 +475,7 @@ int inet_diag_dump_one_icsk(struct inet_hashinfo *hashinfo,
 	if (IS_ERR(sk))
 		return PTR_ERR(sk);
 
-	rep = nlmsg_new(inet_sk_attr_size(), GFP_KERNEL);
+	rep = nlmsg_new(inet_sk_attr_size(sk, req, net_admin), GFP_KERNEL);
 	if (!rep) {
 		err = -ENOMEM;
 		goto out;
@@ -449,8 +484,7 @@ int inet_diag_dump_one_icsk(struct inet_hashinfo *hashinfo,
 	err = sk_diag_fill(sk, rep, req,
 			   sk_user_ns(NETLINK_CB(in_skb).sk),
 			   NETLINK_CB(in_skb).portid,
-			   nlh->nlmsg_seq, 0, nlh,
-			   netlink_net_capable(in_skb, CAP_NET_ADMIN));
+			   nlh->nlmsg_seq, 0, nlh, net_admin);
 	if (err < 0) {
 		WARN_ON(err == -EMSGSIZE);
 		nlmsg_free(rep);

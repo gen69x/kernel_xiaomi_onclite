@@ -19,6 +19,7 @@
 
 #include <linux/module.h>
 #include <linux/uaccess.h>
+#include <linux/error-injection.h>
 
 #include "trace_probe.h"
 
@@ -39,6 +40,7 @@ struct trace_kprobe {
 	(offsetof(struct trace_kprobe, tp.args) +	\
 	(sizeof(struct probe_arg) * (n)))
 
+DEFINE_PER_CPU(int, bpf_kprobe_override);
 
 static nokprobe_inline bool trace_kprobe_is_return(struct trace_kprobe *tk)
 {
@@ -71,6 +73,27 @@ static nokprobe_inline bool trace_kprobe_within_module(struct trace_kprobe *tk,
 static nokprobe_inline bool trace_kprobe_is_on_module(struct trace_kprobe *tk)
 {
 	return !!strchr(trace_kprobe_symbol(tk), ':');
+}
+
+int trace_kprobe_ftrace(struct trace_event_call *call)
+{
+	struct trace_kprobe *tk = (struct trace_kprobe *)call->data;
+	return kprobe_ftrace(&tk->rp.kp);
+}
+
+int trace_kprobe_error_injectable(struct trace_event_call *call)
+{
+	struct trace_kprobe *tk = (struct trace_kprobe *)call->data;
+	unsigned long addr;
+
+	if (tk->symbol) {
+		addr = (unsigned long)
+			kallsyms_lookup_name(trace_kprobe_symbol(tk));
+		addr += tk->rp.kp.offset;
+	} else {
+		addr = (unsigned long)tk->rp.kp.addr;
+	}
+	return within_error_injection_list(addr);
 }
 
 static int register_kprobe_event(struct trace_kprobe *tk);
@@ -150,7 +173,7 @@ static void FETCH_FUNC_NAME(memory, type)(struct pt_regs *regs,		\
 					  void *addr, void *dest)	\
 {									\
 	type retval;							\
-	if (probe_kernel_address(addr, retval))				\
+	if (get_kernel_nofault(retval, addr))				\
 		*(type *)dest = 0;					\
 	else								\
 		*(type *)dest = retval;					\
@@ -165,6 +188,7 @@ DEFINE_BASIC_FETCH_FUNCS(memory)
 static void FETCH_FUNC_NAME(memory, string)(struct pt_regs *regs,
 					    void *addr, void *dest)
 {
+	const void __user *uaddr =  (__force const void __user *)addr;
 	int maxlen = get_rloc_len(*(u32 *)dest);
 	u8 *dst = get_rloc_data(dest);
 	long ret;
@@ -172,11 +196,7 @@ static void FETCH_FUNC_NAME(memory, string)(struct pt_regs *regs,
 	if (!maxlen)
 		return;
 
-	/*
-	 * Try to get string again, since the string can be changed while
-	 * probing.
-	 */
-	ret = strncpy_from_unsafe(dst, addr, maxlen);
+	ret = strncpy_from_user_nofault(dest, uaddr, maxlen);
 
 	if (ret < 0) {	/* Failed to fetch string */
 		dst[0] = '\0';
@@ -1138,7 +1158,7 @@ static int kretprobe_event_define_fields(struct trace_event_call *event_call)
 #ifdef CONFIG_PERF_EVENTS
 
 /* Kprobe profile handler */
-static void
+static int
 kprobe_perf_func(struct trace_kprobe *tk, struct pt_regs *regs)
 {
 	struct trace_event_call *call = &tk->tp.call;
@@ -1147,12 +1167,29 @@ kprobe_perf_func(struct trace_kprobe *tk, struct pt_regs *regs)
 	int size, __size, dsize;
 	int rctx;
 
-	if (bpf_prog_array_valid(call) && !trace_call_bpf(call, regs))
-		return;
+	if (bpf_prog_array_valid(call)) {
+		int ret;
+
+		ret = trace_call_bpf(call, regs);
+
+		/*
+		 * We need to check and see if we modified the pc of the
+		 * pt_regs, and if so clear the kprobe and return 1 so that we
+		 * don't do the instruction skipping.  Also reset our state so
+		 * we are clean the next pass through.
+		 */
+		if (__this_cpu_read(bpf_kprobe_override)) {
+			__this_cpu_write(bpf_kprobe_override, 0);
+			reset_current_kprobe();
+			return 1;
+		}
+		if (!ret)
+			return 0;
+	}
 
 	head = this_cpu_ptr(call->perf_events);
 	if (hlist_empty(head))
-		return;
+		return 0;
 
 	dsize = __get_data_size(&tk->tp, regs);
 	__size = sizeof(*entry) + tk->tp.size + dsize;
@@ -1161,13 +1198,14 @@ kprobe_perf_func(struct trace_kprobe *tk, struct pt_regs *regs)
 
 	entry = perf_trace_buf_alloc(size, NULL, &rctx);
 	if (!entry)
-		return;
+		return 0;
 
 	entry->ip = (unsigned long)tk->rp.kp.addr;
 	memset(&entry[1], 0, dsize);
 	store_trace_args(sizeof(*entry), &tk->tp, regs, (u8 *)&entry[1], dsize);
 	perf_trace_buf_submit(entry, size, rctx, call->event.type, 1, regs,
 			      head, NULL);
+	return 0;
 }
 NOKPROBE_SYMBOL(kprobe_perf_func);
 
@@ -1205,6 +1243,35 @@ kretprobe_perf_func(struct trace_kprobe *tk, struct kretprobe_instance *ri,
 			      head, NULL);
 }
 NOKPROBE_SYMBOL(kretprobe_perf_func);
+
+int bpf_get_kprobe_info(const struct perf_event *event, u32 *fd_type,
+			const char **symbol, u64 *probe_offset,
+			u64 *probe_addr, bool perf_type_tracepoint)
+{
+	const char *pevent = trace_event_name(event->tp_event);
+	const char *group = event->tp_event->class->system;
+	struct trace_kprobe *tk;
+
+	if (perf_type_tracepoint)
+		tk = find_trace_kprobe(pevent, group);
+	else
+		tk = event->tp_event->data;
+	if (!tk)
+		return -EINVAL;
+
+	*fd_type = trace_kprobe_is_return(tk) ? BPF_FD_TYPE_KRETPROBE
+					      : BPF_FD_TYPE_KPROBE;
+	if (tk->symbol) {
+		*symbol = tk->symbol;
+		*probe_offset = tk->rp.kp.offset;
+		*probe_addr = 0;
+	} else {
+		*symbol = NULL;
+		*probe_offset = 0;
+		*probe_addr = (unsigned long)tk->rp.kp.addr;
+	}
+	return 0;
+}
 #endif	/* CONFIG_PERF_EVENTS */
 
 /*
@@ -1243,6 +1310,7 @@ static int kprobe_register(struct trace_event_call *event,
 static int kprobe_dispatcher(struct kprobe *kp, struct pt_regs *regs)
 {
 	struct trace_kprobe *tk = container_of(kp, struct trace_kprobe, rp.kp);
+	int ret = 0;
 
 	raw_cpu_inc(*tk->nhit);
 
@@ -1250,9 +1318,9 @@ static int kprobe_dispatcher(struct kprobe *kp, struct pt_regs *regs)
 		kprobe_trace_func(tk, regs);
 #ifdef CONFIG_PERF_EVENTS
 	if (tk->tp.flags & TP_FLAG_PROFILE)
-		kprobe_perf_func(tk, regs);
+		ret = kprobe_perf_func(tk, regs);
 #endif
-	return 0;	/* We don't tweek kernel, so just return 0 */
+	return ret;
 }
 NOKPROBE_SYMBOL(kprobe_dispatcher);
 

@@ -1,13 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 and
- * only version 2 as published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/kernel.h>
@@ -25,6 +18,10 @@
 #include <dsp/apr_audio-v2.h>
 #include <ipc/apr.h>
 #include "adsp_err.h"
+
+/* For legacy version retrieval */
+#include <dsp/q6adm-v2.h>
+#include <dsp/q6afe-v2.h>
 
 #define TIMEOUT_MS 1000
 /*
@@ -187,7 +184,7 @@ EXPORT_SYMBOL(q6core_send_uevent);
 static int parse_fwk_version_info(uint32_t *payload, uint16_t payload_size)
 {
 	size_t ver_size;
-	int num_services;
+	uint16_t num_services;
 
 	pr_debug("%s: Payload info num services %d\n",
 		 __func__, payload[4]);
@@ -573,6 +570,7 @@ static int q6core_get_avcs_fwk_version(void)
                 break;
         }
         mutex_unlock(&(q6core_lcl.ver_lock));
+
         return ret;
 }
 
@@ -633,6 +631,22 @@ done:
 }
 EXPORT_SYMBOL(q6core_get_fwk_version_size);
 
+static int q6core_get_legacy_avcs_fwk_version(uint32_t service_id)
+{
+	switch (service_id) {
+	case APRV2_IDS_SERVICE_ID_ADSP_ADM_V:
+		return ADSP_ADM_API_VERSION_V1;
+	case APRV2_IDS_SERVICE_ID_ADSP_ASM_V:
+		return ADSP_ASM_API_VERSION_V1;
+	case APRV2_IDS_SERVICE_ID_ADSP_AFE_V:
+		return AFE_API_VERSION_V1;
+	default:
+		break;
+	}
+
+	return -EOPNOTSUPP;
+}
+
 /**
  * q6core_get_avcs_version_per_service -
  *       to get api version of a particular service
@@ -653,7 +667,13 @@ int q6core_get_avcs_api_version_per_service(uint32_t service_id)
 
         ret = q6core_get_avcs_fwk_version();
         if (ret < 0) {
-                pr_err("%s: failure in getting AVCS version\n", __func__);
+		if (ret == -EOPNOTSUPP) {
+			/* Look in legacy support... */
+			ret = q6core_get_legacy_avcs_fwk_version(service_id);
+		} else {
+			pr_err("%s: failure in getting AVCS version\n",
+			       __func__);
+		}
                 return ret;
         }
 

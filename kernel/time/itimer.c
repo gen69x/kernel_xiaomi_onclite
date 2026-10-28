@@ -122,9 +122,10 @@ enum hrtimer_restart it_real_fn(struct hrtimer *timer)
 {
 	struct signal_struct *sig =
 		container_of(timer, struct signal_struct, real_timer);
+	struct pid *leader_pid = sig->pids[PIDTYPE_TGID];
 
-	trace_itimer_expire(ITIMER_REAL, sig->leader_pid, 0);
-	kill_pid_info(SIGALRM, SEND_SIG_PRIV, sig->leader_pid);
+	trace_itimer_expire(ITIMER_REAL, leader_pid, 0);
+	kill_pid_info(SIGALRM, SEND_SIG_PRIV, leader_pid);
 
 	return HRTIMER_NORESTART;
 }
@@ -238,6 +239,8 @@ again:
 	return 0;
 }
 
+#ifdef __ARCH_WANT_SYS_ALARM
+
 /**
  * alarm_setitimer - set alarm in seconds
  *
@@ -250,7 +253,7 @@ again:
  * On 32 bit machines the seconds value is limited to (INT_MAX/2) to avoid
  * negative timeval settings which would cause immediate expiry.
  */
-unsigned int alarm_setitimer(unsigned int seconds)
+static unsigned int alarm_setitimer(unsigned int seconds)
 {
 	struct itimerval it_new, it_old;
 
@@ -274,6 +277,17 @@ unsigned int alarm_setitimer(unsigned int seconds)
 
 	return it_old.it_value.tv_sec;
 }
+
+/*
+ * For backwards compatibility?  This can be done in libc so Alpha
+ * and all newer ports shouldn't need it.
+ */
+SYSCALL_DEFINE1(alarm, unsigned int, seconds)
+{
+	return alarm_setitimer(seconds);
+}
+
+#endif
 
 SYSCALL_DEFINE3(setitimer, int, which, struct itimerval __user *, value,
 		struct itimerval __user *, ovalue)

@@ -262,7 +262,7 @@ static void sem_rcu_free(struct rcu_head *head)
 	struct ipc_rcu *p = container_of(head, struct ipc_rcu, rcu);
 	struct sem_array *sma = ipc_rcu_to_struct(p);
 
-	security_sem_free(sma);
+	security_sem_free(&sma->sem_perm);
 	ipc_rcu_free(head);
 }
 
@@ -539,7 +539,7 @@ static int newary(struct ipc_namespace *ns, struct ipc_params *params)
 	sma->sem_perm.key = key;
 
 	sma->sem_perm.security = NULL;
-	retval = security_sem_alloc(sma);
+	retval = security_sem_alloc(&sma->sem_perm);
 	if (retval) {
 		ipc_rcu_putref(sma, ipc_rcu_free);
 		return retval;
@@ -580,10 +580,7 @@ static int newary(struct ipc_namespace *ns, struct ipc_params *params)
  */
 static inline int sem_security(struct kern_ipc_perm *ipcp, int semflg)
 {
-	struct sem_array *sma;
-
-	sma = container_of(ipcp, struct sem_array, sem_perm);
-	return security_sem_associate(sma, semflg);
+	return security_sem_associate(ipcp, semflg);
 }
 
 /*
@@ -1197,111 +1194,94 @@ static time_t get_semotime(struct sem_array *sma)
 	return res;
 }
 
-static int semctl_nolock(struct ipc_namespace *ns, int semid,
-			 int cmd, int version, void __user *p)
+static int semctl_stat(struct ipc_namespace *ns, int semid,
+			 int cmd, struct semid64_ds *semid64)
 {
-	int err;
 	struct sem_array *sma;
+	int id = 0;
+	int err;
 
-	switch (cmd) {
-	case IPC_INFO:
-	case SEM_INFO:
-	{
-		struct seminfo seminfo;
-		int max_id;
+	memset(semid64, 0, sizeof(*semid64));
 
-		err = security_sem_semctl(NULL, cmd);
-		if (err)
-			return err;
-
-		memset(&seminfo, 0, sizeof(seminfo));
-		seminfo.semmni = ns->sc_semmni;
-		seminfo.semmns = ns->sc_semmns;
-		seminfo.semmsl = ns->sc_semmsl;
-		seminfo.semopm = ns->sc_semopm;
-		seminfo.semvmx = SEMVMX;
-		seminfo.semmnu = SEMMNU;
-		seminfo.semmap = SEMMAP;
-		seminfo.semume = SEMUME;
-		down_read(&sem_ids(ns).rwsem);
-		if (cmd == SEM_INFO) {
-			seminfo.semusz = sem_ids(ns).in_use;
-			seminfo.semaem = ns->used_sems;
-		} else {
-			seminfo.semusz = SEMUSZ;
-			seminfo.semaem = SEMAEM;
-		}
-		max_id = ipc_get_maxid(&sem_ids(ns));
-		up_read(&sem_ids(ns).rwsem);
-		if (copy_to_user(p, &seminfo, sizeof(struct seminfo)))
-			return -EFAULT;
-		return (max_id < 0) ? 0 : max_id;
-	}
-	case IPC_STAT:
-	case SEM_STAT:
-	{
-		struct semid64_ds tbuf;
-		int id = 0;
-
-		memset(&tbuf, 0, sizeof(tbuf));
-
-		rcu_read_lock();
-		if (cmd == SEM_STAT) {
-			sma = sem_obtain_object(ns, semid);
-			if (IS_ERR(sma)) {
-				err = PTR_ERR(sma);
-				goto out_unlock;
-			}
-			id = sma->sem_perm.id;
-		} else {
-			sma = sem_obtain_object_check(ns, semid);
-			if (IS_ERR(sma)) {
-				err = PTR_ERR(sma);
-				goto out_unlock;
-			}
-		}
-
-		err = -EACCES;
-		if (ipcperms(ns, &sma->sem_perm, S_IRUGO))
+	rcu_read_lock();
+	if (cmd == SEM_STAT) {
+		sma = sem_obtain_object(ns, semid);
+		if (IS_ERR(sma)) {
+			err = PTR_ERR(sma);
 			goto out_unlock;
-
-		err = security_sem_semctl(sma, cmd);
-		if (err)
+		}
+		id = sma->sem_perm.id;
+	} else {
+		sma = sem_obtain_object_check(ns, semid);
+		if (IS_ERR(sma)) {
+			err = PTR_ERR(sma);
 			goto out_unlock;
+		}
+	}
 
-		kernel_to_ipc64_perm(&sma->sem_perm, &tbuf.sem_perm);
-		tbuf.sem_otime = get_semotime(sma);
-		tbuf.sem_ctime = sma->sem_ctime;
-		tbuf.sem_nsems = sma->sem_nsems;
-		rcu_read_unlock();
-		if (copy_semid_to_user(p, &tbuf, version))
-			return -EFAULT;
-		return id;
-	}
-	default:
-		return -EINVAL;
-	}
+	err = -EACCES;
+	if (ipcperms(ns, &sma->sem_perm, S_IRUGO))
+		goto out_unlock;
+
+	err = security_sem_semctl(&sma->sem_perm, cmd);
+	if (err)
+		goto out_unlock;
+
+	kernel_to_ipc64_perm(&sma->sem_perm, &semid64->sem_perm);
+	semid64->sem_otime = get_semotime(sma);
+	semid64->sem_ctime = sma->sem_ctime;
+	semid64->sem_nsems = sma->sem_nsems;
+	rcu_read_unlock();
+	return id;
+
 out_unlock:
 	rcu_read_unlock();
 	return err;
 }
 
+static int semctl_info(struct ipc_namespace *ns, int semid,
+			 int cmd, void __user *p)
+{
+	struct seminfo seminfo;
+	int max_id;
+	int err;
+
+	err = security_sem_semctl(NULL, cmd);
+	if (err)
+		return err;
+
+	memset(&seminfo, 0, sizeof(seminfo));
+	seminfo.semmni = ns->sc_semmni;
+	seminfo.semmns = ns->sc_semmns;
+	seminfo.semmsl = ns->sc_semmsl;
+	seminfo.semopm = ns->sc_semopm;
+	seminfo.semvmx = SEMVMX;
+	seminfo.semmnu = SEMMNU;
+	seminfo.semmap = SEMMAP;
+	seminfo.semume = SEMUME;
+	down_read(&sem_ids(ns).rwsem);
+	if (cmd == SEM_INFO) {
+		seminfo.semusz = sem_ids(ns).in_use;
+		seminfo.semaem = ns->used_sems;
+	} else {
+		seminfo.semusz = SEMUSZ;
+		seminfo.semaem = SEMAEM;
+	}
+	max_id = ipc_get_maxid(&sem_ids(ns));
+	up_read(&sem_ids(ns).rwsem);
+	if (copy_to_user(p, &seminfo, sizeof(struct seminfo)))
+		return -EFAULT;
+	return (max_id < 0) ? 0 : max_id;
+}
+
 static int semctl_setval(struct ipc_namespace *ns, int semid, int semnum,
-		unsigned long arg)
+		int val)
 {
 	struct sem_undo *un;
 	struct sem_array *sma;
 	struct sem *curr;
 	int err;
 	struct list_head tasks;
-	int val;
-#if defined(CONFIG_64BIT) && defined(__BIG_ENDIAN)
-	/* big-endian 64bit */
-	val = arg >> 32;
-#else
-	/* 32bit or little-endian 64bit */
-	val = arg;
-#endif
 
 	if (val > SEMVMX || val < 0)
 		return -ERANGE;
@@ -1326,7 +1306,7 @@ static int semctl_setval(struct ipc_namespace *ns, int semid, int semnum,
 		return -EACCES;
 	}
 
-	err = security_sem_semctl(sma, SETVAL);
+	err = security_sem_semctl(&sma->sem_perm, SETVAL);
 	if (err) {
 		rcu_read_unlock();
 		return -EACCES;
@@ -1382,7 +1362,7 @@ static int semctl_main(struct ipc_namespace *ns, int semid, int semnum,
 	if (ipcperms(ns, &sma->sem_perm, cmd == SETALL ? S_IWUGO : S_IRUGO))
 		goto out_rcu_wakeup;
 
-	err = security_sem_semctl(sma, cmd);
+	err = security_sem_semctl(&sma->sem_perm, cmd);
 	if (err)
 		goto out_rcu_wakeup;
 
@@ -1553,23 +1533,17 @@ copy_semid_from_user(struct semid64_ds *out, void __user *buf, int version)
  * NOTE: no locks must be held, the rwsem is taken inside this function.
  */
 static int semctl_down(struct ipc_namespace *ns, int semid,
-		       int cmd, int version, void __user *p)
+		       int cmd, struct semid64_ds *semid64)
 {
 	struct sem_array *sma;
 	int err;
-	struct semid64_ds semid64;
 	struct kern_ipc_perm *ipcp;
-
-	if (cmd == IPC_SET) {
-		if (copy_semid_from_user(&semid64, p, version))
-			return -EFAULT;
-	}
 
 	down_write(&sem_ids(ns).rwsem);
 	rcu_read_lock();
 
 	ipcp = ipcctl_pre_down_nolock(ns, &sem_ids(ns), semid, cmd,
-				      &semid64.sem_perm, 0);
+				      &semid64->sem_perm, 0);
 	if (IS_ERR(ipcp)) {
 		err = PTR_ERR(ipcp);
 		goto out_unlock1;
@@ -1577,7 +1551,7 @@ static int semctl_down(struct ipc_namespace *ns, int semid,
 
 	sma = container_of(ipcp, struct sem_array, sem_perm);
 
-	err = security_sem_semctl(sma, cmd);
+	err = security_sem_semctl(&sma->sem_perm, cmd);
 	if (err)
 		goto out_unlock1;
 
@@ -1589,7 +1563,7 @@ static int semctl_down(struct ipc_namespace *ns, int semid,
 		goto out_up;
 	case IPC_SET:
 		sem_lock(sma, NULL, -1);
-		err = ipc_update_perm(&semid64.sem_perm, ipcp);
+		err = ipc_update_perm(&semid64->sem_perm, ipcp);
 		if (err)
 			goto out_unlock0;
 		sma->sem_ctime = get_seconds();
@@ -1613,6 +1587,8 @@ SYSCALL_DEFINE4(semctl, int, semid, int, semnum, int, cmd, unsigned long, arg)
 	int version;
 	struct ipc_namespace *ns;
 	void __user *p = (void __user *)arg;
+	struct semid64_ds semid64;
+	int err;
 
 	if (semid < 0)
 		return -EINVAL;
@@ -1623,9 +1599,15 @@ SYSCALL_DEFINE4(semctl, int, semid, int, semnum, int, cmd, unsigned long, arg)
 	switch (cmd) {
 	case IPC_INFO:
 	case SEM_INFO:
+		return semctl_info(ns, semid, cmd, p);
 	case IPC_STAT:
 	case SEM_STAT:
-		return semctl_nolock(ns, semid, cmd, version, p);
+		err = semctl_stat(ns, semid, cmd, &semid64);
+		if (err < 0)
+			return err;
+		if (copy_semid_to_user(p, &semid64, version))
+			err = -EFAULT;
+		return err;
 	case GETALL:
 	case GETVAL:
 	case GETPID:
@@ -1633,15 +1615,120 @@ SYSCALL_DEFINE4(semctl, int, semid, int, semnum, int, cmd, unsigned long, arg)
 	case GETZCNT:
 	case SETALL:
 		return semctl_main(ns, semid, semnum, cmd, p);
-	case SETVAL:
-		return semctl_setval(ns, semid, semnum, arg);
-	case IPC_RMID:
+	case SETVAL: {
+		int val;
+#if defined(CONFIG_64BIT) && defined(__BIG_ENDIAN)
+		/* big-endian 64bit */
+		val = arg >> 32;
+#else
+		/* 32bit or little-endian 64bit */
+		val = arg;
+#endif
+		return semctl_setval(ns, semid, semnum, val);
+	}
 	case IPC_SET:
-		return semctl_down(ns, semid, cmd, version, p);
+		if (copy_semid_from_user(&semid64, p, version))
+			return -EFAULT;
+	case IPC_RMID:
+		return semctl_down(ns, semid, cmd, &semid64);
 	default:
 		return -EINVAL;
 	}
 }
+
+#ifdef CONFIG_COMPAT
+
+struct compat_semid_ds {
+	struct compat_ipc_perm sem_perm;
+	compat_time_t sem_otime;
+	compat_time_t sem_ctime;
+	compat_uptr_t sem_base;
+	compat_uptr_t sem_pending;
+	compat_uptr_t sem_pending_last;
+	compat_uptr_t undo;
+	unsigned short sem_nsems;
+};
+
+static int copy_compat_semid_from_user(struct semid64_ds *out, void __user *buf,
+					int version)
+{
+	memset(out, 0, sizeof(*out));
+	if (version == IPC_64) {
+		struct compat_semid64_ds *p = buf;
+		return get_compat_ipc64_perm(&out->sem_perm, &p->sem_perm);
+	} else {
+		struct compat_semid_ds *p = buf;
+		return get_compat_ipc_perm(&out->sem_perm, &p->sem_perm);
+	}
+}
+
+static int copy_compat_semid_to_user(void __user *buf, struct semid64_ds *in,
+					int version)
+{
+	if (version == IPC_64) {
+		struct compat_semid64_ds v;
+		memset(&v, 0, sizeof(v));
+		to_compat_ipc64_perm(&v.sem_perm, &in->sem_perm);
+		v.sem_otime = in->sem_otime;
+		v.sem_ctime = in->sem_ctime;
+		v.sem_nsems = in->sem_nsems;
+		return copy_to_user(buf, &v, sizeof(v));
+	} else {
+		struct compat_semid_ds v;
+		memset(&v, 0, sizeof(v));
+		to_compat_ipc_perm(&v.sem_perm, &in->sem_perm);
+		v.sem_otime = in->sem_otime;
+		v.sem_ctime = in->sem_ctime;
+		v.sem_nsems = in->sem_nsems;
+		return copy_to_user(buf, &v, sizeof(v));
+	}
+}
+
+COMPAT_SYSCALL_DEFINE4(semctl, int, semid, int, semnum, int, cmd, int, arg)
+{
+	void __user *p = compat_ptr(arg);
+	struct ipc_namespace *ns;
+	struct semid64_ds semid64;
+	int version = compat_ipc_parse_version(&cmd);
+	int err;
+
+	ns = current->nsproxy->ipc_ns;
+
+	if (semid < 0)
+		return -EINVAL;
+
+	switch (cmd & (~IPC_64)) {
+	case IPC_INFO:
+	case SEM_INFO:
+		return semctl_info(ns, semid, cmd, p);
+	case IPC_STAT:
+	case SEM_STAT:
+		err = semctl_stat(ns, semid, cmd, &semid64);
+		if (err < 0)
+			return err;
+		if (copy_compat_semid_to_user(p, &semid64, version))
+			err = -EFAULT;
+		return err;
+	case GETVAL:
+	case GETPID:
+	case GETNCNT:
+	case GETZCNT:
+	case GETALL:
+	case SETALL:
+		return semctl_main(ns, semid, semnum, cmd, p);
+	case SETVAL:
+		return semctl_setval(ns, semid, semnum, arg);
+	case IPC_SET:
+		if (copy_compat_semid_from_user(&semid64, p, version))
+			return -EFAULT;
+		/* fallthru */
+	case IPC_RMID:
+		return semctl_down(ns, semid, cmd, &semid64);
+	default:
+		return -EINVAL;
+	}
+}
+#endif
 
 /* If the task doesn't already have a undo_list, then allocate one
  * here.  We guarantee there is only one thread using this undo list,
@@ -1894,7 +1981,7 @@ SYSCALL_DEFINE4(semtimedop, int, semid, struct sembuf __user *, tsops,
 	if (ipcperms(ns, &sma->sem_perm, alter ? S_IWUGO : S_IRUGO))
 		goto out_rcu_wakeup;
 
-	error = security_sem_semop(sma, sops, nsops, alter);
+	error = security_sem_semop(&sma->sem_perm, sops, nsops, alter);
 	if (error)
 		goto out_rcu_wakeup;
 

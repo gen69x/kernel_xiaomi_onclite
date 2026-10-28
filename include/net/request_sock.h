@@ -1,7 +1,7 @@
 /*
  * NET		Generic infrastructure for Network protocols.
  *
- *		Definitions for request_sock 
+ *		Definitions for request_sock
  *
  * Authors:	Arnaldo Carvalho de Melo <acme@conectiva.com.br>
  *
@@ -44,6 +44,13 @@ struct request_sock_ops {
 
 int inet_rtx_syn_ack(const struct sock *parent, struct request_sock *req);
 
+struct saved_syn {
+	u32 mac_hdrlen;
+	u32 network_hdrlen;
+	u32 tcp_hdrlen;
+	u8 data[];
+};
+
 /* struct request_sock - mini sock to represent a connection request
  */
 struct request_sock {
@@ -63,7 +70,7 @@ struct request_sock {
 	struct timer_list		rsk_timer;
 	const struct request_sock_ops	*rsk_ops;
 	struct sock			*sk;
-	u32				*saved_syn;
+	struct saved_syn		*saved_syn;
 	u32				secid;
 	u32				peer_secid;
 };
@@ -122,8 +129,6 @@ static inline void reqsk_put(struct request_sock *req)
 	if (atomic_dec_and_test(&req->rsk_refcnt))
 		reqsk_free(req);
 }
-
-extern int sysctl_max_syn_backlog;
 
 /*
  * For a TCP Fast Open listener -

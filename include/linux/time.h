@@ -5,10 +5,16 @@
 # include <linux/seqlock.h>
 # include <linux/math64.h>
 # include <linux/time64.h>
+# include <linux/timex.h>
 
-#define TIMER_LOCK_TIGHT_LOOP_DELAY_NS	350
+# include <vdso/time32.h>
 
 extern struct timezone sys_tz;
+
+int get_timespec64(struct timespec64 *ts,
+		const struct timespec __user *uts);
+int put_timespec64(const struct timespec64 *ts,
+		struct timespec __user *uts);
 
 #define TIME_T_MAX	(time_t)((1UL << ((sizeof(time_t) << 3) - 1)) - 1)
 
@@ -174,8 +180,6 @@ extern int do_setitimer(int which, struct itimerval *value,
 			struct itimerval *ovalue);
 extern int do_getitimer(int which, struct itimerval *value);
 
-extern unsigned int alarm_setitimer(unsigned int seconds);
-
 extern long do_utimes(int dfd, const char __user *filename, struct timespec *times, int flags);
 
 struct tms;
@@ -262,6 +266,19 @@ extern struct timespec ns_to_timespec(const s64 nsec);
  * Returns the timeval representation of the nsec parameter.
  */
 extern struct timeval ns_to_timeval(const s64 nsec);
+extern struct __kernel_old_timeval ns_to_kernel_old_timeval(s64 nsec);
+
+/*
+ * New aliases for compat time functions. These will be used to replace
+ * the compat code so it can be shared between 32-bit and 64-bit builds
+ * both of which provide compatibility with old 32-bit tasks.
+ */
+#define old_itimerspec32	compat_itimerspec
+#define ns_to_old_timeval32	ns_to_compat_timeval
+#define get_old_itimerspec32	get_compat_itimerspec64
+#define put_old_itimerspec32	put_compat_itimerspec64
+#define get_old_timespec32	compat_get_timespec64
+#define put_old_timespec32	compat_put_timespec64
 
 /**
  * timespec_add_ns - Adds nanoseconds to a timespec

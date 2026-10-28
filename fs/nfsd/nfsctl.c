@@ -347,7 +347,7 @@ static ssize_t write_unlock_fs(struct file *file, char *buf, size_t size)
 static ssize_t write_filehandle(struct file *file, char *buf, size_t size)
 {
 	char *dname, *path;
-	int uninitialized_var(maxsize);
+	int maxsize;
 	char *mesg = buf;
 	int len;
 	struct auth_domain *dom;
@@ -1128,7 +1128,7 @@ static ssize_t write_v4_end_grace(struct file *file, char *buf, size_t size)
 
 static int nfsd_fill_super(struct super_block * sb, void * data, int silent)
 {
-	static struct tree_descr nfsd_files[] = {
+	static const struct tree_descr nfsd_files[] = {
 		[NFSD_List] = {"exports", &exports_nfsd_operations, S_IRUGO},
 		[NFSD_Export_features] = {"export_features",
 					&export_features_operations, S_IRUGO},

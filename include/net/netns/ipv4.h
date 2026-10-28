@@ -28,6 +28,18 @@ struct ping_group_range {
 	kgid_t		range[2];
 };
 
+struct inet_hashinfo;
+
+struct inet_timewait_death_row {
+	atomic_t		tw_count;
+
+	struct inet_hashinfo 	*hashinfo ____cacheline_aligned_in_smp;
+	int			sysctl_tw_recycle;
+	int			sysctl_max_tw_buckets;
+};
+
+struct tcp_fastopen_context;
+
 struct netns_ipv4 {
 #ifdef CONFIG_SYSCTL
 	struct ctl_table_header	*forw_hdr;
@@ -87,6 +99,8 @@ struct netns_ipv4 {
 	/* Shall we try to damage output packets if routing dev changes? */
 	int sysctl_ip_dynaddr;
 	int sysctl_ip_early_demux;
+	int sysctl_tcp_early_demux;
+	int sysctl_udp_early_demux;
 
 	int sysctl_fwmark_reflect;
 	int sysctl_tcp_fwmark_accept;
@@ -112,7 +126,21 @@ struct netns_ipv4 {
 	int sysctl_tcp_orphan_retries;
 	int sysctl_tcp_fin_timeout;
 	unsigned int sysctl_tcp_notsent_lowat;
+	int sysctl_tcp_tw_reuse;
+	struct inet_timewait_death_row tcp_death_row;
+	int sysctl_max_syn_backlog;
+	int sysctl_tcp_fastopen;
+	const struct tcp_congestion_ops __rcu  *tcp_congestion_control;
+	struct tcp_fastopen_context __rcu *tcp_fastopen_ctx;
+	spinlock_t tcp_fastopen_ctx_lock;
+	unsigned int sysctl_tcp_fastopen_blackhole_timeout;
+	atomic_t tfo_active_disable_times;
+	unsigned long tfo_active_disable_stamp;
 	int sysctl_tcp_default_init_rwnd;
+
+#ifdef CONFIG_NET_L3_MASTER_DEV
+	int sysctl_udp_l3mdev_accept;
+#endif
 
 	int sysctl_igmp_max_memberships;
 	int sysctl_igmp_max_msf;
@@ -138,6 +166,9 @@ struct netns_ipv4 {
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
 	int sysctl_fib_multipath_use_neigh;
 #endif
+
+	unsigned int	fib_seq;	/* protected by rtnl_mutex */
+
 	atomic_t	rt_genid;
 	siphash_key_t	ip_id_key;
 };

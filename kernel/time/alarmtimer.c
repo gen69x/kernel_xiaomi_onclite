@@ -25,8 +25,6 @@
 #include <linux/posix-timers.h>
 #include <linux/workqueue.h>
 #include <linux/freezer.h>
-#include <linux/delay.h>
-
 
 /**
  * struct alarm_base - Alarm timer bases
@@ -439,7 +437,6 @@ int alarm_cancel(struct alarm *alarm)
 		if (ret >= 0)
 			return ret;
 		cpu_relax();
-		ndelay(TIMER_LOCK_TIGHT_LOOP_DELAY_NS);
 	}
 }
 EXPORT_SYMBOL_GPL(alarm_cancel);
@@ -888,8 +885,10 @@ static int __init alarmtimer_init(void)
 
 	alarmtimer_rtc_timer_init();
 
-	posix_timers_register_clock(CLOCK_REALTIME_ALARM, &alarm_clock);
-	posix_timers_register_clock(CLOCK_BOOTTIME_ALARM, &alarm_clock);
+	if (IS_ENABLED(CONFIG_POSIX_TIMERS)) {
+		posix_timers_register_clock(CLOCK_REALTIME_ALARM, &alarm_clock);
+		posix_timers_register_clock(CLOCK_BOOTTIME_ALARM, &alarm_clock);
+	}
 
 	/* Initialize alarm bases */
 	alarm_bases[ALARM_REALTIME].base_clockid = CLOCK_REALTIME;

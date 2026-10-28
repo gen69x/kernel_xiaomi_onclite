@@ -1020,6 +1020,9 @@ static void ip6gre_tunnel_setup(struct net_device *dev)
 	dev->flags |= IFF_NOARP;
 	dev->addr_len = sizeof(struct in6_addr);
 	netif_keep_dst(dev);
+	/* This perm addr will be used as interface identifier by IPv6 */
+	dev->addr_assign_type = NET_ADDR_RANDOM;
+	eth_random_addr(dev->perm_addr);
 }
 
 static int ip6gre_tunnel_init_common(struct net_device *dev)
@@ -1091,7 +1094,7 @@ static void ip6gre_fb_tunnel_init(struct net_device *dev)
 }
 
 
-static struct inet6_protocol ip6gre_protocol __read_mostly = {
+static const struct inet6_protocol ip6gre_protocol = {
 	.handler     = gre_rcv,
 	.err_handler = ip6gre_err,
 	.flags       = INET6_PROTO_NOPOLICY|INET6_PROTO_FINAL,
@@ -1303,6 +1306,7 @@ static void ip6gre_tap_setup(struct net_device *dev)
 
 	ether_setup(dev);
 
+	dev->max_mtu = 0;
 	dev->netdev_ops = &ip6gre_tap_netdev_ops;
 	dev->destructor = ip6gre_dev_free;
 

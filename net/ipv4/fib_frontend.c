@@ -339,8 +339,6 @@ static int __fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst,
 
 	fl4.flowi4_mark = IN_DEV_SRC_VMARK(idev) ? skb->mark : 0;
 
-	trace_fib_validate_source(dev, &fl4);
-
 	if (fib_lookup(net, &fl4, &res, 0))
 		goto last_resort;
 	if (res.type != RTN_UNICAST &&
@@ -356,10 +354,10 @@ static int __fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst,
 	for (ret = 0; ret < res.fi->fib_nhs; ret++) {
 		struct fib_nh *nh = &res.fi->fib_nh[ret];
 
-		if (nh->nh_dev == dev) {
+		if (nh->fib_nh_dev == dev) {
 			dev_match = true;
 			break;
-		} else if (l3mdev_master_ifindex_rcu(nh->nh_dev) == dev->ifindex) {
+		} else if (l3mdev_master_ifindex_rcu(nh->fib_nh_dev) == dev->ifindex) {
 			dev_match = true;
 			break;
 		}
@@ -369,7 +367,7 @@ static int __fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst,
 		dev_match = true;
 #endif
 	if (dev_match) {
-		ret = FIB_RES_NH(res).nh_scope >= RT_SCOPE_HOST;
+		ret = FIB_RES_NH(res).fib_nh_scope >= RT_SCOPE_HOST;
 		return ret;
 	}
 	if (no_addr)
@@ -381,7 +379,7 @@ static int __fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst,
 	ret = 0;
 	if (fib_lookup(net, &fl4, &res, FIB_LOOKUP_IGNORE_LINKSTATE) == 0) {
 		if (res.type == RTN_UNICAST)
-			ret = FIB_RES_NH(res).nh_scope >= RT_SCOPE_HOST;
+			ret = FIB_RES_NH(res).fib_nh_scope >= RT_SCOPE_HOST;
 	}
 	return ret;
 
@@ -1239,6 +1237,8 @@ static int __net_init ip_fib_net_init(struct net *net)
 {
 	int err;
 	size_t size = sizeof(struct hlist_head) * FIB_TABLE_HASHSZ;
+
+	net->ipv4.fib_seq = 0;
 
 	/* Avoid false sharing : Use at least a full cache line */
 	size = max_t(size_t, size, L1_CACHE_BYTES);

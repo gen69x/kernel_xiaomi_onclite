@@ -32,7 +32,7 @@
 #include <linux/gfp.h>
 #include <linux/memblock.h>
 #include <linux/edd.h>
-#include <linux/frame.h>
+#include <linux/objtool.h>
 
 #include <linux/kexec.h>
 #include <linux/slab.h>
@@ -545,7 +545,7 @@ static void set_aliased_prot(void *v, pgprot_t prot)
 
 	preempt_disable();
 
-	probe_kernel_read(&dummy, v, 1);
+	copy_from_kernel_nofault(&dummy, v, 1);
 
 	if (HYPERVISOR_update_va_mapping((unsigned long)v, pte, 0))
 		BUG();

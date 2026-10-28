@@ -101,6 +101,19 @@
 
 #define SO_CNX_ADVICE		53
 
+#define SCM_TIMESTAMPING_OPT_STATS	54
+
 #define SO_COOKIE		57
+
+#define SCM_TIMESTAMPING_PKTINFO	58
+
+#define SO_PEERGROUPS		59
+
+#define SO_ZEROCOPY		60
+
+#define SO_TXTIME		61
+#define SCM_TXTIME		SO_TXTIME
+
+#define SO_BINDTOIFINDEX	62
 
 #endif	/* _XTENSA_SOCKET_H */

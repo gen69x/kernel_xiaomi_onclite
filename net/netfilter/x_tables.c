@@ -1038,7 +1038,7 @@ struct xt_table_info *xt_alloc_table_info(unsigned int size)
 		return NULL;
 
 	/* Pedantry: prevent them from hitting BUG() in vmalloc.c --RR */
-	if ((size >> PAGE_SHIFT) + 2 > totalram_pages)
+	if ((size >> PAGE_SHIFT) + 2 > totalram_pages())
 		return NULL;
 
 	if (sz <= (PAGE_SIZE << PAGE_ALLOC_COSTLY_ORDER))
@@ -1242,7 +1242,7 @@ xt_replace_table(struct xt_table *table,
 	if (audit_enabled) {
 		struct audit_buffer *ab;
 
-		ab = audit_log_start(current->audit_context, GFP_KERNEL,
+		ab = audit_log_start(audit_context(), GFP_KERNEL,
 				     AUDIT_NETFILTER_CFG);
 		if (ab) {
 			audit_log_format(ab, "table=%s family=%u entries=%u",

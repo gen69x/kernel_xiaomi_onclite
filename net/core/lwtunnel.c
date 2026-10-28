@@ -40,6 +40,10 @@ static const char *lwtunnel_encap_str(enum lwtunnel_encap_types encap_type)
 		return "MPLS";
 	case LWTUNNEL_ENCAP_ILA:
 		return "ILA";
+	case LWTUNNEL_ENCAP_SEG6:
+		return "SEG6";
+	case LWTUNNEL_ENCAP_BPF:
+		return "BPF";
 	case LWTUNNEL_ENCAP_IP6:
 	case LWTUNNEL_ENCAP_IP:
 	case LWTUNNEL_ENCAP_NONE:
@@ -167,7 +171,6 @@ int lwtunnel_valid_encap_type_attr(struct nlattr *attr, int remaining)
 	struct rtnexthop *rtnh = (struct rtnexthop *)attr;
 	struct nlattr *nla_entype;
 	struct nlattr *attrs;
-	struct nlattr *nla;
 	u16 encap_type;
 	int attrlen;
 
@@ -175,7 +178,6 @@ int lwtunnel_valid_encap_type_attr(struct nlattr *attr, int remaining)
 		attrlen = rtnh_attrlen(rtnh);
 		if (attrlen > 0) {
 			attrs = rtnh_attrs(rtnh);
-			nla = nla_find(attrs, attrlen, RTA_ENCAP);
 			nla_entype = nla_find(attrs, attrlen, RTA_ENCAP_TYPE);
 
 			if (nla_entype) {

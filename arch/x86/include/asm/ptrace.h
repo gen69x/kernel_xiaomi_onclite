@@ -88,6 +88,11 @@ static inline unsigned long regs_return_value(struct pt_regs *regs)
 	return regs->ax;
 }
 
+static inline void regs_set_return_value(struct pt_regs *regs, unsigned long rc)
+{
+	regs->ax = rc;
+}
+
 /*
  * user_mode(regs) determines whether a register set came from user
  * mode.  On x86_32, this is true if V8086 mode was enabled OR if the
@@ -220,7 +225,7 @@ static inline unsigned long *regs_get_kernel_stack_nth_addr(struct pt_regs *regs
 }
 
 /* To avoid include hell, we can't include uaccess.h */
-extern long probe_kernel_read(void *dst, const void *src, size_t size);
+extern long copy_from_kernel_nofault(void *dst, const void *src, size_t size);
 
 /**
  * regs_get_kernel_stack_nth() - get Nth entry of the stack
@@ -240,7 +245,7 @@ static inline unsigned long regs_get_kernel_stack_nth(struct pt_regs *regs,
 
 	addr = regs_get_kernel_stack_nth_addr(regs, n);
 	if (addr) {
-		ret = probe_kernel_read(&val, addr, sizeof(val));
+		ret = copy_from_kernel_nofault(&val, addr, sizeof(val));
 		if (!ret)
 			return val;
 	}

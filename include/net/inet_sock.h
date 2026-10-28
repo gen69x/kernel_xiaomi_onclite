@@ -92,7 +92,8 @@ struct inet_request_sock {
 				wscale_ok  : 1,
 				ecn_ok	   : 1,
 				acked	   : 1,
-				no_srccheck: 1;
+				no_srccheck: 1,
+				smc_ok	   : 1;
 	kmemcheck_bitfield_end(flags);
 	u32                     ir_mark;
 	union {
@@ -144,6 +145,7 @@ struct inet_cork {
 	__u8			ttl;
 	__s16			tos;
 	char			priority;
+	__u16			gso_size;
 };
 
 struct inet_cork_full {

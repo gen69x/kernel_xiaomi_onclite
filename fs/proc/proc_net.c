@@ -105,6 +105,25 @@ int single_release_net(struct inode *ino, struct file *f)
 }
 EXPORT_SYMBOL_GPL(single_release_net);
 
+int bpf_iter_init_seq_net(void *priv_data, struct bpf_iter_aux_info *aux)
+{
+#ifdef CONFIG_NET_NS
+	struct seq_net_private *p = priv_data;
+
+	p->net = get_net(current->nsproxy->net_ns);
+#endif
+	return 0;
+}
+
+void bpf_iter_fini_seq_net(void *priv_data)
+{
+#ifdef CONFIG_NET_NS
+	struct seq_net_private *p = priv_data;
+
+	put_net(p->net);
+#endif
+}
+
 static struct net *get_proc_task_net(struct inode *dir)
 {
 	struct task_struct *task;
@@ -140,10 +159,10 @@ static struct dentry *proc_tgid_net_lookup(struct inode *dir,
 	return de;
 }
 
-static int proc_tgid_net_getattr(struct vfsmount *mnt, struct dentry *dentry,
-		struct kstat *stat)
+static int proc_tgid_net_getattr(const struct path *path, struct kstat *stat,
+				 u32 request_mask, unsigned int query_flags)
 {
-	struct inode *inode = d_inode(dentry);
+	struct inode *inode = d_inode(path->dentry);
 	struct net *net;
 
 	net = get_proc_task_net(inode);

@@ -9,7 +9,6 @@
 #include <asm/uaccess.h>
 #include <linux/kernel_stat.h>
 #include <trace/events/timer.h>
-#include <linux/random.h>
 #include <linux/tick.h>
 #include <linux/workqueue.h>
 
@@ -447,10 +446,7 @@ static void cleanup_timers(struct list_head *head)
  */
 void posix_cpu_timers_exit(struct task_struct *tsk)
 {
-	add_device_randomness((const void*) &tsk->se.sum_exec_runtime,
-						sizeof(unsigned long long));
 	cleanup_timers(tsk->cpu_timers);
-
 }
 void posix_cpu_timers_exit_group(struct task_struct *tsk)
 {
@@ -917,7 +913,7 @@ static void check_cpu_itimer(struct task_struct *tsk, struct cpu_itimer *it,
 
 		trace_itimer_expire(signo == SIGPROF ?
 				    ITIMER_PROF : ITIMER_VIRTUAL,
-				    tsk->signal->leader_pid, cur_time);
+				    task_tgid(tsk), cur_time);
 		__group_send_sig_info(signo, SEND_SIG_PRIV, tsk);
 	}
 

@@ -463,6 +463,7 @@ tcp_recovery - INTEGER
 
 	RACK: 0x1 enables the RACK loss detection for fast detection of lost
 	      retransmissions and tail drops.
+	RACK: 0x2 makes RACK's reordering window static (min_rtt/4).
 
 	Default: 0x1
 
@@ -608,6 +609,15 @@ tcp_fastopen - INTEGER
 
 	Note that that additional client or server features are only
 	effective if the basic support (0x1 and 0x2) are enabled respectively.
+
+tcp_fastopen_blackhole_timeout_sec - INTEGER
+	Initial time period in second to disable Fastopen on active TCP sockets
+	when a TFO firewall blackhole issue happens.
+	This time period will grow exponentially when more blackhole issues
+	get detected right after Fastopen is re-enabled and will reset to
+	initial value when the blackhole issue goes away.
+	0 to disable the blackhole detection.
+	By default, it is set to 1hr.
 
 tcp_fwmark_accept - BOOLEAN
 	If set, incoming connections to listening sockets that do not have a
@@ -763,6 +773,13 @@ tcp_challenge_ack_limit - INTEGER
 
 UDP variables:
 
+udp_l3mdev_accept - BOOLEAN
+	Enabling this option allows a "global" bound socket to work
+	across L3 master domains (e.g., VRFs) with packets capable of
+	being received regardless of the L3 domain in which they
+	originated. Only valid when the kernel was compiled with
+	CONFIG_NET_L3_MASTER_DEV.
+
 udp_mem - vector of 3 INTEGERs: min, pressure, max
 	Number of pages allowed for queueing by all UDP sockets.
 
@@ -884,10 +901,19 @@ ip_dynaddr - INTEGER
 ip_early_demux - BOOLEAN
 	Optimize input packet processing down to one demux for
 	certain kinds of local sockets.  Currently we only do this
-	for established TCP sockets.
+	for established TCP and connected UDP sockets.
 
 	It may add an additional cost for pure routing workloads that
 	reduces overall throughput, in such case you should disable it.
+	Default: 1
+
+tcp_early_demux - BOOLEAN
+	Enable early demux for established TCP sockets.
+	Default: 1
+
+udp_early_demux - BOOLEAN
+	Enable early demux for connected UDP sockets. Disable this if
+	your system could experience more unconnected load.
 	Default: 1
 
 icmp_echo_ignore_all - BOOLEAN
@@ -1680,6 +1706,9 @@ accept_dad - INTEGER
 	2: Enable DAD, and disable IPv6 operation if MAC-based duplicate
 	   link-local address has been found.
 
+	DAD operation and mode on a given interface will be selected according
+	to the maximum value of conf/{all,interface}/accept_dad.
+
 force_tllao - BOOLEAN
 	Enable sending the target link-layer address option even when
 	responding to a unicast neighbor solicitation.
@@ -1727,16 +1756,23 @@ suppress_frag_ndisc - INTEGER
 
 optimistic_dad - BOOLEAN
 	Whether to perform Optimistic Duplicate Address Detection (RFC 4429).
-		0: disabled (default)
-		1: enabled
+	0: disabled (default)
+	1: enabled
+
+	Optimistic Duplicate Address Detection for the interface will be enabled
+	if at least one of conf/{all,interface}/optimistic_dad is set to 1,
+	it will be disabled otherwise.
 
 use_optimistic - BOOLEAN
 	If enabled, do not classify optimistic addresses as deprecated during
 	source address selection.  Preferred addresses will still be chosen
 	before optimistic addresses, subject to other ranking in the source
 	address selection algorithm.
-		0: disabled (default)
-		1: enabled
+	0: disabled (default)
+	1: enabled
+
+	This will be enabled if at least one of
+	conf/{all,interface}/use_optimistic is set to 1, disabled otherwise.
 
 stable_secret - IPv6 address
 	This IPv6 address will be used as a secret to generate IPv6
